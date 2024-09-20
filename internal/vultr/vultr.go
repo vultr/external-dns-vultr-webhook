@@ -40,8 +40,6 @@ type VultrChanges struct {
 type Configuration struct {
 	APIKey               string   `env:"VULTR_API_KEY" required:"true"`
 	DryRun               bool     `env:"DRY_RUN" default:"false"`
-	BatchSize            int      `env:"BATCH_SIZE" default:"100"`
-	DefaultTTL           int      `env:"DEFAULT_TTL" default:"7200"`
 	DomainFilter         []string `env:"DOMAIN_FILTER" default:""`
 	ExcludeDomains       []string `env:"EXCLUDE_DOMAIN_FILTER" default:""`
 	RegexDomainFilter    string   `env:"REGEXP_DOMAIN_FILTER" default:""`
