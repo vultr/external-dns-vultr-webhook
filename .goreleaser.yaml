@@ -1,4 +1,3 @@
-project_name: external-dns-vultr-webhook
 version: 2
 
 builds:
