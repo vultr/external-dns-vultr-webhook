@@ -56,7 +56,7 @@ extraArgs:
 
 sidecars:
   - name: vultr-webhook
-    image: ghcr.io/vultr/external-dns-vultr-webhook:v0.1.0
+    image: vultr/external-dns-vultr-webhook:v0.1.0
     ports:
       - containerPort: 8888
         name: webhook
@@ -107,7 +107,7 @@ provider:
   name: webhook
   webhook:
     image:
-      repository: ghcr.io/vultr/external-dns-vultr-webhook
+      repository: vultr/external-dns-vultr-webhook
       tag: v0.1.0
     env:
       - name: VULTR_API_KEY
