@@ -66,7 +66,7 @@ run:build ## Run the binary on local machine
 ##@ Docker
 
 .PHONY: docker-build
-docker-build: build ## Build the docker image
+docker-build: build-linux ## Build the docker image
 	docker build ./ -f localbuild.Dockerfile -t $(IMAGE)
 
 .PHONY: docker-push
