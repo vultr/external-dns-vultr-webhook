@@ -9,7 +9,6 @@ endif
 
 ARTIFACT_NAME = external-dns-vultr-webhook
 
-
 REGISTRY ?= localhost:5001
 IMAGE_NAME ?= external-dns-vultr-webhook
 IMAGE_TAG ?= latest
@@ -56,6 +55,10 @@ clean: ## Clean the build directory
 build: ## Build the binary
 	CGO_ENABLED=0 go build -o build/bin/$(ARTIFACT_NAME) ./cmd/webhook
 
+.PHONY: build-linux
+build-linux: ## Build the binary for linux
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o build/bin/$(ARTIFACT_NAME) ./cmd/webhook
+
 .PHONY: run
 run:build ## Run the binary on local machine
 	build/bin/external-dns-vultr-webhook
@@ -77,6 +80,9 @@ unit-test: ## Run unit tests
 	mkdir -p build/reports
 	$(GO_TEST) --junitfile build/reports/unit-test.xml -- -race ./... -count=1 -short -cover -coverprofile build/reports/unit-test-coverage.out
 
+##@ Deploy
+.PHONY: deploy
+deploy: docker-build docker-push
 
 ##@ Release
 
