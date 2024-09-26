@@ -53,22 +53,24 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: 1.23
-
-      - name: Docker Login
+      -
+        name: Docker Login
         env:
-          DOCKER_USERNAME: ${{ github.repository_owner }}
-          DOCKER_PASSWORD: ${{ secrets.CR_PAT }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: |
-          echo "${DOCKER_PASSWORD}" | docker login ghcr.io --username "${DOCKER_USERNAME}" --password-stdin
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v2
+          echo "${DOCKER_PASSWORD}" | docker login --username "${DOCKER_USERNAME}" --password-stdin
+      -
+        name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: 1.26.2
-          args: release --rm-dist
+          version: latest
+          args: release --clean
         env:
-          GITHUB_TOKEN: ${{ secrets.CR_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Clear
         if: always()
