@@ -16,7 +16,6 @@ import (
 const (
 	vultrCreate = "CREATE"
 	vultrDelete = "DELETE"
-	vultrUpdate = "UPDATE"
 	vultrTTL    = 3600
 )
 
@@ -76,7 +75,11 @@ func (p *VultrProvider) Records(ctx context.Context) ([]*endpoint.Endpoint, erro
 		return nil, err
 	}
 
-	var endpoints []*endpoint.Endpoint
+	type endpointKey struct {
+		name       string
+		recordType string
+	}
+	endpointMap := make(map[endpointKey]*endpoint.Endpoint)
 
 	for _, zone := range zones {
 		records, err := p.fetchRecords(ctx, zone.Domain)
@@ -94,9 +97,19 @@ func (p *VultrProvider) Records(ctx context.Context) ([]*endpoint.Endpoint, erro
 					name = zone.Domain
 				}
 
-				endpoints = append(endpoints, endpoint.NewEndpointWithTTL(name, r.Type, endpoint.TTL(r.TTL), r.Data))
+				key := endpointKey{name: name, recordType: r.Type}
+				if ep, exists := endpointMap[key]; exists {
+					ep.Targets = append(ep.Targets, r.Data)
+				} else {
+					endpointMap[key] = endpoint.NewEndpointWithTTL(name, r.Type, endpoint.TTL(r.TTL), r.Data)
+				}
 			}
 		}
+	}
+
+	endpoints := make([]*endpoint.Endpoint, 0, len(endpointMap))
+	for _, ep := range endpointMap {
+		endpoints = append(endpoints, ep)
 	}
 
 	return endpoints, nil
@@ -189,14 +202,6 @@ func (p *VultrProvider) submitChanges(ctx context.Context, changes []*VultrChang
 				if err := p.client.DomainRecord.Delete(ctx, zoneName, id); err != nil {
 					return err
 				}
-			case vultrUpdate:
-				id, err := p.getRecordID(ctx, zoneName, change.ResourceRecordSet)
-				if err != nil {
-					return err
-				}
-				if err := p.client.DomainRecord.Update(ctx, zoneName, id, change.ResourceRecordSet); err != nil {
-					return err
-				}
 			}
 		}
 	}
@@ -205,10 +210,11 @@ func (p *VultrProvider) submitChanges(ctx context.Context, changes []*VultrChang
 
 // ApplyChanges applies a given set of changes in a given zone.
 func (p *VultrProvider) ApplyChanges(ctx context.Context, changes *plan.Changes) error {
-	combinedChanges := make([]*VultrChanges, 0, len(changes.Create)+len(changes.UpdateNew)+len(changes.Delete))
+	combinedChanges := make([]*VultrChanges, 0, len(changes.Create)+len(changes.UpdateOld)+len(changes.UpdateNew)+len(changes.Delete))
 
 	combinedChanges = append(combinedChanges, newVultrChanges(vultrCreate, changes.Create)...)
-	combinedChanges = append(combinedChanges, newVultrChanges(vultrUpdate, changes.UpdateNew)...)
+	combinedChanges = append(combinedChanges, newVultrChanges(vultrDelete, changes.UpdateOld)...)
+	combinedChanges = append(combinedChanges, newVultrChanges(vultrCreate, changes.UpdateNew)...)
 	combinedChanges = append(combinedChanges, newVultrChanges(vultrDelete, changes.Delete)...)
 
 	return p.submitChanges(ctx, combinedChanges)
@@ -216,23 +222,25 @@ func (p *VultrProvider) ApplyChanges(ctx context.Context, changes *plan.Changes)
 
 func newVultrChanges(action string, endpoints []*endpoint.Endpoint) []*VultrChanges {
 	changes := make([]*VultrChanges, 0, len(endpoints))
-	ttl := vultrTTL
 	for _, e := range endpoints {
+		ttl := vultrTTL
 		if e.RecordTTL.IsConfigured() {
 			ttl = int(e.RecordTTL)
 		}
 
-		change := &VultrChanges{
-			Action: action,
-			ResourceRecordSet: &govultr.DomainRecordReq{
-				Type: e.RecordType,
-				Name: e.DNSName,
-				Data: e.Targets[0],
-				TTL:  ttl,
-			},
-		}
+		for _, target := range e.Targets {
+			change := &VultrChanges{
+				Action: action,
+				ResourceRecordSet: &govultr.DomainRecordReq{
+					Type: e.RecordType,
+					Name: e.DNSName,
+					Data: target,
+					TTL:  ttl,
+				},
+			}
 
-		changes = append(changes, change)
+			changes = append(changes, change)
+		}
 	}
 	return changes
 }
@@ -271,7 +279,7 @@ func (p *VultrProvider) getRecordID(ctx context.Context, zone string, record *go
 				strippedName = ""
 			}
 
-			if r.Name == strippedName && r.Type == record.Type {
+			if r.Name == strippedName && r.Type == record.Type && r.Data == record.Data {
 				return r.ID, nil
 			}
 		}
