@@ -5,13 +5,17 @@ Domain Name System (DNS) records for Kubernetes services by using different DNS 
 By default, Kubernetes manages DNS records internally,
 but ExternalDNS takes this functionality a step further by delegating the management of DNS records to an external DNS
 provider such as this one.
-Therefore, the Vultr webhook allows to manage your
-Vultr domains inside your kubernetes cluster with [ExternalDNS](https://github.com/kubernetes-sigs/external-dns).
+The Vultr webhook manages Vultr DNS zones from a Kubernetes cluster with
+[ExternalDNS](https://github.com/kubernetes-sigs/external-dns).
 
 To use ExternalDNS with Vultr, you need your Vultr API token of the account managing
 your domains.
 For detailed technical instructions on how the Vultr webhook is deployed using the Bitnami Helm charts for ExternalDNS,
-see[deployment instructions](#kubernetes-deployment).
+see the [deployment instructions](#kubernetes-deployment).
+
+Supported record types are `A`, `AAAA`, `CAA`, `CNAME`, `MX`, `NS`, `SRV`,
+`SSHFP`, and `TXT`. MX and SRV priorities are translated between ExternalDNS's
+target format and Vultr's dedicated priority field.
 
 ## Kubernetes Deployment
 
@@ -21,13 +25,14 @@ a [sidecar container](https://kubernetes.io/docs/concepts/workloads/pods/#worklo
 ExternalDNS pod
 using the [Bitnami Helm charts for ExternalDNS](https://github.com/bitnami/charts/tree/main/bitnami/external-dns).
 
-⚠️  This webhook requires at least ExternalDNS v0.14.0.
+This release is tested with ExternalDNS v0.23.0.
 
 The webhook can be installed using either the Bitnami chart or the ExternalDNS one.
 
-First, create the Vultr secret:
+First, create the namespace and Vultr secret:
 
-```yaml
+```shell
+kubectl create namespace external-dns
 kubectl create secret generic vultr-credentials --from-literal=api-key='<EXAMPLE_PLEASE_REPLACE>' -n external-dns
 ```
 
@@ -46,7 +51,7 @@ You can then create the helm values file, for example
 image:
   registry: registry.k8s.io
   repository: external-dns/external-dns
-  tag: v0.14.0
+  tag: v0.23.0
 
 provider: webhook
 
@@ -56,7 +61,7 @@ extraArgs:
 
 sidecars:
   - name: vultr-webhook
-    image: vultr/external-dns-vultr-webhook:v0.1.0
+    image: vultr/external-dns-vultr-webhook:v0.2.0
     ports:
       - containerPort: 8888
         name: webhook
@@ -74,6 +79,18 @@ sidecars:
         port: http
       initialDelaySeconds: 10
       timeoutSeconds: 5
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
     env:
       - name: VULTR_API_KEY
         valueFrom:
@@ -102,13 +119,13 @@ You can then create the helm values file, for example
 
 ```yaml
 namespace: external-dns
-policy: sync
+policy: upsert-only
 provider:
   name: webhook
   webhook:
     image:
       repository: vultr/external-dns-vultr-webhook
-      tag: v0.1.0
+      tag: v0.2.0
     env:
       - name: VULTR_API_KEY
         valueFrom:
@@ -127,6 +144,18 @@ provider:
         port: http-wh-metrics
       initialDelaySeconds: 10
       timeoutSeconds: 5
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
 
 extraArgs:
   - --txt-prefix=reg-
@@ -136,23 +165,26 @@ And then:
 
 ```shell
 # install external-dns with helm
-helm install external-dns-vultr external-dns/external-dns -f external-dns-vultr-values.yaml --version 1.14.3 -n external-dns
+helm install external-dns-vultr external-dns/external-dns -f external-dns-vultr-values.yaml -n external-dns
 ```
 
 ## Environment variables
 
 The following environment variables are available:
 
-| Variable        | Description                      | Notes                      |
-| --------------- | -------------------------------- | -------------------------- |
-| VULTR_API_KEY | Vultr API token                | Mandatory                  |
-| DRY_RUN         | If set, changes won't be applied | Default: `false`           |
-| WEBHOOK_HOST    | Webhook hostname or IP address   | Default: `localhost`       |
-| WEBHOOK_PORT    | Webhook port                     | Default: `8888`            |
-| HEALTH_HOST     | Liveness and readiness hostname  | Default: `0.0.0.0`         |
-| HEALTH_PORT     | Liveness and readiness port      | Default: `8080`            |
-| READ_TIMEOUT    | Servers' read timeout in ms      | Default: `60000`           |
-| WRITE_TIMEOUT   | Servers' write timeout in ms     | Default: `60000`           |
+| Variable            | Description                         | Notes                |
+| ------------------- | ----------------------------------- | -------------------- |
+| VULTR_API_KEY       | Vultr API token                     | Mandatory            |
+| DRY_RUN             | Validate and log without API writes | Default: `false`     |
+| WEBHOOK_HOST        | Webhook hostname or IP address      | Default: `localhost` |
+| WEBHOOK_PORT        | Webhook port                        | Default: `8888`      |
+| HEALTH_HOST         | Liveness and readiness hostname     | Default: `0.0.0.0`   |
+| HEALTH_PORT         | Liveness and readiness port         | Default: `8080`      |
+| READ_TIMEOUT        | Server read timeout in ms           | Default: `60000`     |
+| WRITE_TIMEOUT       | Server write timeout in ms          | Default: `60000`     |
+| READ_HEADER_TIMEOUT | Server header timeout in ms         | Default: `5000`      |
+| IDLE_TIMEOUT        | Server idle timeout in ms           | Default: `60000`     |
+| MAX_BODY_SIZE       | Maximum webhook body in bytes       | Default: `1048576`   |
 
 Additional environment variables for domain filtering:
 
@@ -181,11 +213,10 @@ consideration:
 
 - if `WEBHOOK_HOST` and `HEALTH_HOST` are set to the same address/hostname or
   one of them is set to `0.0.0.0` remember to use different ports.
-- if your records don't get deleted when applications are uninstalled, you
+- if your records do not get deleted when applications are uninstalled, you
   might want to verify the policy in use for ExternalDNS: if it's `upsert-only`
-  no deletion will occur. It must be set to `sync` for deletions to be
-  processed. Please add the following to `external-dns-vultr-values.yaml` if
-  you want this strategy:
+  no deletion will occur. Set it to `sync` only when ExternalDNS should delete
+  records it owns. Verify TXT ownership records before enabling this strategy:
 
   ```yaml
   policy: sync
@@ -195,3 +226,6 @@ consideration:
 
 The basic development tasks are provided by make. Run `make help` to see the
 available targets.
+
+Use `make unit-test`, `make static-analysis`, and `make build` before opening a
+pull request. The project follows the Go version declared in `go.mod`.

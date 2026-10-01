@@ -1,11 +1,5 @@
-GO_TEST = go run gotest.tools/gotestsum --format pkgname
-
-LICENCES_IGNORE_LIST = $(shell cat licences/licences-ignore-list.txt)
-
-ifndef $(GOPATH)
-    GOPATH=$(shell go env GOPATH)
-    export GOPATH
-endif
+GO_TEST = go run gotest.tools/gotestsum@v1.13.0 --format pkgname
+GOLANGCI_LINT = go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
 
 ARTIFACT_NAME = external-dns-vultr-webhook
 
@@ -38,7 +32,7 @@ vet: ## Run go vet against code.
 .PHONY: lint
 lint: ## Run golangci-lint against code.
 	mkdir -p build/reports
-	go run github.com/golangci/golangci-lint/cmd/golangci-lint run --timeout 2m
+	$(GOLANGCI_LINT) run --timeout 5m
 
 .PHONY: static-analysis
 static-analysis: lint vet ## Run static analysis against code.
@@ -53,11 +47,11 @@ clean: ## Clean the build directory
 
 .PHONY: build
 build: ## Build the binary
-	CGO_ENABLED=0 go build -o build/bin/$(ARTIFACT_NAME) ./cmd/webhook
+	CGO_ENABLED=0 go build -trimpath -o build/bin/$(ARTIFACT_NAME) ./cmd/webhook
 
 .PHONY: build-linux
 build-linux: ## Build the binary for linux
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o build/bin/$(ARTIFACT_NAME) ./cmd/webhook
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o build/bin/$(ARTIFACT_NAME) ./cmd/webhook
 
 .PHONY: run
 run:build ## Run the binary on local machine
@@ -89,19 +83,3 @@ deploy: docker-build docker-push
 .PHONY: release-check
 release-check: ## Check if the release will work
 	GITHUB_SERVER_URL=github.com GITHUB_REPOSITORY=vultr/external-dns-vultr-webhook REGISTRY=$(REGISTRY) IMAGE_NAME=$(IMAGE_NAME) goreleaser release --snapshot --clean --skip=publish
-
-##@ License
-
-.PHONY: license-check
-license-check: ## Run go-licenses check against code.
-	go install github.com/google/go-licenses
-	mkdir -p build/reports
-	echo "$(LICENCES_IGNORE_LIST)"
-	$(GOPATH)/bin/go-licenses check --include_tests --ignore "$(LICENCES_IGNORE_LIST)" ./...
-
-.PHONY: license-report
-license-report: ## Create licenses report against code.
-	go install github.com/google/go-licenses
-	mkdir -p build/reports/licenses
-	$(GOPATH)/bin/go-licenses report --include_tests --ignore "$(LICENCES_IGNORE_LIST)" ./... >build/reports/licenses/licenses-list.csv
-	cat licences/licenses-manual-list.csv >> build/reports/licenses/licenses-list.csv

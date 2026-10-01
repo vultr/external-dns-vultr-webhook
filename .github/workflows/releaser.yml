@@ -11,15 +11,19 @@ permissions:
 jobs:
   check-commit:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       msg_check: ${{ steps.check-msg.outputs.match }}
     steps:
       - name: Check Message
         id: check-msg
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
-          pattern="^Release v[0-9]+.[0-9]+.[0-9]+ #(minor|major|patch)$"
-          if [[ "${{ github.event.head_commit.message }}" =~ ${pattern} ]]; then
-              echo ::set-output name=match::true
+          pattern='^Release v[0-9]+\.[0-9]+\.[0-9]+ #(minor|major|patch)$'
+          if [[ "${COMMIT_MESSAGE}" =~ ${pattern} ]]; then
+              echo "match=true" >> "${GITHUB_OUTPUT}"
           fi
   create-tag:
     runs-on: ubuntu-latest
@@ -28,7 +32,7 @@ jobs:
     outputs:
       new_tag: ${{ steps.tagger.outputs.new_tag }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v5
         with:
           fetch-depth: '0'
 
@@ -45,14 +49,15 @@ jobs:
     needs: create-tag
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v6
         with:
-          go-version: 1.23
+          go-version-file: go.mod
+          cache: true
       -
         name: Docker Login
         env:
@@ -65,7 +70,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: latest
+          version: v2.12.7
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -81,14 +86,10 @@ jobs:
     needs: ["goreleaser", "create-tag"]
     name: Release Notification
     steps:
-      - name: Get the version
-        id: get_version
-        run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
-
       - run: |
           echo "{\"text\":\"External-DNS Vultr Webhook : Release https://github.com/${{ github.repository }}/releases/tag/${{ needs.create-tag.outputs.new_tag }} \"}" > mattermost.json
 
-      - uses: mattermost/action-mattermost-notify@master
+      - uses: mattermost/action-mattermost-notify@ae31bb6f9e26a54336e79696f108a2c91cf55b4e
         env:
           MATTERMOST_WEBHOOK_URL: ${{ secrets.MATTERMOST_WEBHOOK_URL }}
           MATTERMOST_USERNAME: ${{ secrets.MATTERMOST_USERNAME}}

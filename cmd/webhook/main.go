@@ -42,17 +42,24 @@ func main() {
 	}
 
 	// instantiate the Vultr provider
-	provider := vultr.NewProvider(providerConfig)
+	provider, err := vultr.NewProvider(providerConfig)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Start the webhook
 	log.Infof("Starting webhook server on %s", serverOptions.GetWebhookAddress())
 	startedChan := make(chan struct{})
-	go api.StartHTTPApi(
-		provider, startedChan,
-		serverOptions.GetReadTimeout(),
-		serverOptions.GetWriteTimeout(),
-		serverOptions.GetWebhookAddress(),
-	)
+	go api.StartHTTPApi(api.ServerOptions{
+		Provider:          provider,
+		StartedChan:       startedChan,
+		ProviderPort:      serverOptions.GetWebhookAddress(),
+		ReadTimeout:       serverOptions.GetReadTimeout(),
+		WriteTimeout:      serverOptions.GetWriteTimeout(),
+		ReadHeaderTimeout: serverOptions.GetReadHeaderTimeout(),
+		IdleTimeout:       serverOptions.GetIdleTimeout(),
+		MaxBodySize:       serverOptions.MaxBodySize,
+	})
 
 	// Wait for the HTTP server to start and then set the healthy and ready flags
 	<-startedChan

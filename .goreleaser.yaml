@@ -1,11 +1,13 @@
 version: 2
 
 builds:
-  - main: ./cmd/webhook
+  - id: webhook
+    main: ./cmd/webhook
+    binary: external-dns-vultr-webhook
     env:
       - CGO_ENABLED=0
     flags:
-      - -trimpath #removes all file system paths from the compiled executable
+      - -trimpath
 
     goos:
       - linux
@@ -21,16 +23,22 @@ checksum:
   algorithm: sha256
 
 snapshot:
-  name_template: "{{ .ProjectName }}_v{{ .Version }}"
+  version_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc
 
-dockers:
-  - dockerfile: Dockerfile
-    image_templates:
-      - "vultr/external-dns-vultr-webhook:latest"
-      - "vultr/external-dns-vultr-webhook:{{ .Tag }}"
+dockers_v2:
+  - ids: [webhook]
+    dockerfile: Dockerfile
+    images: ["vultr/external-dns-vultr-webhook"]
+    tags: ["{{ .Tag }}", "latest"]
+    platforms: ["linux/amd64", "linux/arm64"]
+    labels:
+      org.opencontainers.image.source: "https://github.com/Vultr/external-dns-vultr-webhook"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.licenses: "Apache-2.0"
 
 release:
   github:

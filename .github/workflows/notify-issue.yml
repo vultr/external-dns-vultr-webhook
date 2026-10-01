@@ -6,7 +6,7 @@ on:
 
 jobs:
   pr:
-    uses: vultr/shared-actions/.github/workflows/notify-issue.yml@main
+    uses: vultr/shared-actions/.github/workflows/notify-issue.yml@0bd6842999b6890065117e596dd12ab4fdba410f
     secrets: inherit
     with:
       repository: ${{ github.repository }}

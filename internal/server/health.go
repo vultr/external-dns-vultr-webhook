@@ -10,7 +10,7 @@ import (
 
 // HealthStatus contains the health and ready statuses for the webhook.
 type HealthStatus struct {
-	m       sync.Mutex
+	m       sync.RWMutex
 	healthy bool
 	ready   bool
 }
@@ -31,20 +31,16 @@ func (h *HealthStatus) SetReady(v bool) {
 
 // IsHealthy returns the healthy flag.
 func (h *HealthStatus) IsHealthy() bool {
-	var healthy bool
-	h.m.Lock()
-	healthy = h.healthy
-	h.m.Unlock()
-	return healthy
+	h.m.RLock()
+	defer h.m.RUnlock()
+	return h.healthy
 }
 
 // IsReady returns the readiness status.
 func (h *HealthStatus) IsReady() bool {
-	var ready bool
-	h.m.Lock()
-	ready = h.ready
-	h.m.Unlock()
-	return ready
+	h.m.RLock()
+	defer h.m.RUnlock()
+	return h.ready
 }
 
 // HealthServer is the liveness and readiness server.
@@ -97,10 +93,12 @@ func (s *HealthServer) Start(status *HealthStatus, startedChan chan struct{}, op
 	address := options.GetHealthAddress()
 
 	srv := &http.Server{
-		Addr:         address,
-		Handler:      mux,
-		ReadTimeout:  options.GetReadTimeout(),
-		WriteTimeout: options.GetWriteTimeout(),
+		Addr:              address,
+		Handler:           mux,
+		ReadTimeout:       options.GetReadTimeout(),
+		ReadHeaderTimeout: options.GetReadHeaderTimeout(),
+		WriteTimeout:      options.GetWriteTimeout(),
+		IdleTimeout:       options.GetIdleTimeout(),
 	}
 
 	l, err := net.Listen("tcp", address)
@@ -112,7 +110,7 @@ func (s *HealthServer) Start(status *HealthStatus, startedChan chan struct{}, op
 		startedChan <- struct{}{}
 	}
 
-	if err := srv.Serve(l); err != nil {
+	if err := srv.Serve(l); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
 }
