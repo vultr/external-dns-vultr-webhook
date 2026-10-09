@@ -5,7 +5,7 @@ go 1.27.0
 require (
 	github.com/codingconcepts/env v0.0.0-20240618133406-5b0845441187
 	github.com/sirupsen/logrus v1.10.2
-	github.com/vultr/govultr/v3 v3.33.0
+	github.com/vultr/govultr/v3 v3.33.1
 	golang.org/x/oauth2 v0.37.0
 	sigs.k8s.io/external-dns v0.23.0
 )
