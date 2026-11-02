@@ -23,8 +23,6 @@ func TestTargetNormalization(t *testing.T) {
 		{"MX", "0 .", "0 ."},
 		{"SRV", "0010 0020 00443 Service.Example.NET", "10 20 443 service.example.net."},
 		{"SRV", "0 0 0 .", "0 0 0 ."},
-		{"SSHFP", "01 01 ABCDEF", "1 1 abcdef"},
-		{"CAA", `00 IODEF "mailto:test@example.net?subject=two  words"`, `0 iodef "mailto:test@example.net?subject=two  words"`},
 		{"TXT", `"keep CASE,  spaces, and dots.."`, `"keep CASE,  spaces, and dots.."`},
 		{"TXT", "unquoted  text", `"unquoted  text"`},
 		{"TXT", "", `""`},
@@ -51,7 +49,6 @@ func TestTargetNormalization(t *testing.T) {
 		{"AAAA", "fe80::1%eth0"}, {"A", "2001:db8::1"}, {"AAAA", "192.0.2.1"},
 		{"MX", "65536 mail.example.net"}, {"MX", "-1 mail.example.net"},
 		{"SRV", "0 -1 443 service.example.net"}, {"SRV", "0 1 65536 service.example.net"},
-		{"CAA", `0 invalid-tag "value"`}, {"SSHFP", "0 1 abcdef"},
 	} {
 		if _, err := canonicalTarget(tt.recordType, tt.target); err == nil {
 			t.Errorf("accepted invalid %s target %q", tt.recordType, tt.target)

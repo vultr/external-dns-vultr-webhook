@@ -13,15 +13,9 @@ your domains.
 For detailed technical instructions on how the Vultr webhook is deployed using the Bitnami Helm charts for ExternalDNS,
 see the [deployment instructions](#kubernetes-deployment).
 
-Supported record types are `A`, `AAAA`, `CAA`, `CNAME`, `MX`, `NS`, `SRV`,
-`SSHFP`, and `TXT`. MX and SRV priorities are translated between ExternalDNS's
+Supported record types are `A`, `AAAA`, `CNAME`, `MX`, `NS`, `SRV`,
+and `TXT`. MX and SRV priorities are translated between ExternalDNS's
 target format and Vultr's dedicated priority field.
-
-**ExternalDNS v0.23.0 compatibility:** its TXT registry recognizes ownership for
-`A`, `AAAA`, `CNAME`, `MX`, `NS`, `SRV`, and `TXT`, but not `CAA` or `SSHFP`.
-Although the webhook API implements CAA and SSHFP operations, those two types
-cannot complete an ownership-managed lifecycle with that version's TXT registry.
-Do not rely on the standard TXT-registry deployment below to manage them.
 
 ## Kubernetes Deployment
 
@@ -238,10 +232,10 @@ pull request. The project follows the Go version declared in `go.mod`.
 
 The automated suite runs without Vultr credentials. It covers:
 
-- All nine webhook record types through create/read/update/delete round trips,
+- All seven supported record types through create/read/update/delete round trips,
   using the real Vultr client against an HTTP test server with API-shaped data.
-- ExternalDNS planner convergence and TXT ownership cleanup for the seven types
-  supported by its TXT mapper; CAA/SSHFP planner tests use the noop registry.
+- ExternalDNS planner convergence and TXT ownership cleanup for every supported
+  record type.
 - Multi-target and duplicate records, TTL changes, record-type transitions,
   apex/wildcard names, null MX/SRV, and target normalization.
 - Pagination, domain-filter negotiation, dry-run, cross-zone validation, API

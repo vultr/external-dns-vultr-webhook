@@ -10,7 +10,6 @@ import (
 	"sigs.k8s.io/external-dns/endpoint"
 	"sigs.k8s.io/external-dns/pkg/apis/externaldns"
 	"sigs.k8s.io/external-dns/plan"
-	"sigs.k8s.io/external-dns/registry/noop"
 	"sigs.k8s.io/external-dns/registry/txt"
 )
 
@@ -58,8 +57,6 @@ func TestExternalDNSReconciliation(t *testing.T) {
 		{"MX", []string{"10 mail.example.net"}, []string{"20 mail.example.net"}},
 		{"SRV", []string{"10 20 443 service.example.net."}, []string{"20 20 443 service.example.net."}},
 		{"NS", []string{"ns1.example.net"}, []string{"ns2.example.net"}},
-		{"CAA", []string{`0 issue "letsencrypt.org"`}, []string{`0 issue "example.net"`}},
-		{"SSHFP", []string{"1 1 abcdef"}, []string{"1 1 fedcba"}},
 		{"TXT", []string{"old text"}, []string{"new text"}},
 	} {
 		t.Run(tt.recordType, func(t *testing.T) {
@@ -68,12 +65,6 @@ func TestExternalDNSReconciliation(t *testing.T) {
 			p.records = store
 			managed := []string{tt.recordType}
 			registry, err := txt.New(&externaldns.Config{TXTPrefix: "reg-", TXTOwnerID: "test-owner", ManagedDNSRecordTypes: managed}, p)
-			// ExternalDNS v0.23.0's TXT mapper cannot decode CAA/SSHFP ownership
-			// names. These types can only be tested with the noop registry here;
-			// this upstream compatibility limitation is documented in README.md.
-			if tt.recordType == "CAA" || tt.recordType == "SSHFP" {
-				registry, err = noop.New(nil, p)
-			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -102,7 +93,7 @@ func TestExternalDNSReconciliation(t *testing.T) {
 				if changes := calculate(desired); changes.HasChanges() {
 					t.Fatalf("stage %d never converged: %+v", i, changes)
 				}
-				if i < 2 && registry.OwnerID() != "" {
+				if i < 2 {
 					ownershipFound := false
 					for _, record := range store.byZone["example.com"] {
 						if record.Type == "TXT" && record.Name != "app" {

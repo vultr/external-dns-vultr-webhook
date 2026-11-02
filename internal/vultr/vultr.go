@@ -2,7 +2,6 @@ package vultr
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -28,8 +27,8 @@ const (
 )
 
 var supportedRecordTypes = map[string]struct{}{
-	"A": {}, "AAAA": {}, "CAA": {}, "CNAME": {}, "MX": {},
-	"NS": {}, "SRV": {}, "SSHFP": {}, "TXT": {},
+	"A": {}, "AAAA": {}, "CNAME": {}, "MX": {},
+	"NS": {}, "SRV": {}, "TXT": {},
 }
 
 type domainService interface {
@@ -511,35 +510,6 @@ func canonicalTarget(recordType, target string) (string, error) {
 			hostname += "."
 		}
 		return strings.Join([]string{fields[0], fields[1], fields[2], hostname}, " "), nil
-	case "CAA":
-		if len(fields) < 3 {
-			return "", fmt.Errorf("expected 'flags tag value'")
-		}
-		flags, err := strconv.ParseUint(fields[0], 10, 8)
-		if err != nil {
-			return "", fmt.Errorf("flags must be an integer from 0 to 255")
-		}
-		if matched, _ := regexp.MatchString(`^[A-Za-z0-9]+$`, fields[1]); !matched {
-			return "", fmt.Errorf("tag must contain only letters and digits")
-		}
-		value := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(target), fields[0]))
-		value = strings.TrimSpace(strings.TrimPrefix(value, fields[1]))
-		return fmt.Sprintf("%d %s %s", flags, strings.ToLower(fields[1]), value), nil
-	case "SSHFP":
-		if len(fields) != 3 {
-			return "", fmt.Errorf("expected 'algorithm fingerprint-type fingerprint'")
-		}
-		for i, label := range []string{"algorithm", "fingerprint type"} {
-			value, err := strconv.ParseUint(fields[i], 10, 8)
-			if err != nil || value == 0 {
-				return "", fmt.Errorf("%s must be an integer from 1 to 255", label)
-			}
-			fields[i] = strconv.FormatUint(value, 10)
-		}
-		if _, err := hex.DecodeString(fields[2]); err != nil {
-			return "", fmt.Errorf("fingerprint must be hexadecimal")
-		}
-		return strings.Join([]string{fields[0], fields[1], strings.ToLower(fields[2])}, " "), nil
 	default:
 		return target, nil
 	}
@@ -668,7 +638,7 @@ func canonicalVultrData(recordType, data string) string {
 				return strings.TrimPrefix(target, "0 ")
 			}
 		}
-	case "A", "AAAA", "CAA", "SSHFP", "TXT":
+	case "A", "AAAA", "TXT":
 		if target, err := canonicalTarget(strings.ToUpper(recordType), data); err == nil {
 			return target
 		}

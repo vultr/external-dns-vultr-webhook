@@ -16,8 +16,6 @@ func FuzzRecordRoundTrip(f *testing.F) {
 		{"TXT", `text with "quotes" and \slashes`},
 		{"TXT", "line\nwith\ttabs"},
 		{"TXT", `"ends with slash\\"`},
-		{"CAA", `0 IODEF "mailto:test@example.net?subject=two  words"`},
-		{"SSHFP", "01 01 ABCDEF"},
 	} {
 		f.Add(seed.recordType, seed.target)
 	}

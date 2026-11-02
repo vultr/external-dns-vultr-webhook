@@ -51,8 +51,6 @@ func TestWebhookRecordLifecycle(t *testing.T) {
 		{"NS", `{"id":"old","type":"NS","name":"app","data":"NS1.Example.NET.","priority":-1,"ttl":300}`, "ns1.example.net", "ns2.example.net"},
 		{"MX", `{"id":"old","type":"MX","name":"app","data":"Mail.Example.NET.","priority":10,"ttl":300}`, "10 mail.example.net", "20 mail.example.net"},
 		{"SRV", `{"id":"old","type":"SRV","name":"app","data":"20 443 Service.Example.NET.","priority":10,"ttl":300}`, "10 20 443 service.example.net.", "20 20 443 service.example.net."},
-		{"CAA", `{"id":"old","type":"CAA","name":"app","data":"0 ISSUE \"letsencrypt.org\"","priority":-1,"ttl":300}`, `0 issue "letsencrypt.org"`, `0 issue "example.net"`},
-		{"SSHFP", `{"id":"old","type":"SSHFP","name":"app","data":"1 1 ABCDEF","priority":-1,"ttl":300}`, "1 1 abcdef", "1 1 fedcba"},
 		{"apex", `{"id":"old","type":"A","name":"example.com","data":"192.0.2.1","priority":-1,"ttl":300}`, "192.0.2.1", "192.0.2.2"},
 		{"absolute-name", `{"id":"old","type":"A","name":"App.Example.COM.","data":"192.0.2.1","priority":-1,"ttl":300}`, "192.0.2.1", "192.0.2.2"},
 		{"null-MX", `{"id":"old","type":"MX","name":"app","data":".","priority":0,"ttl":300}`, "0 .", "10 mail.example.net"},
