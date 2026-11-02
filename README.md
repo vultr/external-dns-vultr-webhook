@@ -17,6 +17,12 @@ Supported record types are `A`, `AAAA`, `CAA`, `CNAME`, `MX`, `NS`, `SRV`,
 `SSHFP`, and `TXT`. MX and SRV priorities are translated between ExternalDNS's
 target format and Vultr's dedicated priority field.
 
+**ExternalDNS v0.23.0 compatibility:** its TXT registry recognizes ownership for
+`A`, `AAAA`, `CNAME`, `MX`, `NS`, `SRV`, and `TXT`, but not `CAA` or `SSHFP`.
+Although the webhook API implements CAA and SSHFP operations, those two types
+cannot complete an ownership-managed lifecycle with that version's TXT registry.
+Do not rely on the standard TXT-registry deployment below to manage them.
+
 ## Kubernetes Deployment
 
 The deployment can be performed in every way Kubernetes supports.
@@ -229,3 +235,25 @@ available targets.
 
 Use `make unit-test`, `make static-analysis`, and `make build` before opening a
 pull request. The project follows the Go version declared in `go.mod`.
+
+The automated suite runs without Vultr credentials. It covers:
+
+- All nine webhook record types through create/read/update/delete round trips,
+  using the real Vultr client against an HTTP test server with API-shaped data.
+- ExternalDNS planner convergence and TXT ownership cleanup for the seven types
+  supported by its TXT mapper; CAA/SSHFP planner tests use the noop registry.
+- Multi-target and duplicate records, TTL changes, record-type transitions,
+  apex/wildcard names, null MX/SRV, and target normalization.
+- Pagination, domain-filter negotiation, dry-run, cross-zone validation, API
+  failures, request limits, and malformed requests.
+- Process startup, HTTP route wiring, health/readiness, and SIGTERM shutdown.
+
+Run additional target-conversion fuzzing with:
+
+```shell
+go test ./internal/vultr -run '^$' -fuzz '^FuzzRecordRoundTrip$' -fuzztime=30s
+```
+
+These tests do not replace live API validation: before release, verify record
+lifecycles against a disposable authorized zone and confirm cleanup restores
+its original records.
