@@ -13,6 +13,9 @@ func FuzzRecordRoundTrip(f *testing.F) {
 		{"MX", "0010 Mail.Example.NET."}, {"MX", "0 ."},
 		{"SRV", "0010 0020 00443 Service.Example.NET."}, {"SRV", "0 0 0 ."},
 		{"TXT", `"preserve  spaces and dots.."`},
+		{"TXT", `text with "quotes" and \slashes`},
+		{"TXT", "line\nwith\ttabs"},
+		{"TXT", `"ends with slash\\"`},
 		{"CAA", `0 IODEF "mailto:test@example.net?subject=two  words"`},
 		{"SSHFP", "01 01 ABCDEF"},
 	} {

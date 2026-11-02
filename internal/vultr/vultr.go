@@ -465,6 +465,10 @@ func relativeRecordName(name, zone string) (string, error) {
 func canonicalTarget(recordType, target string) (string, error) {
 	fields := strings.Fields(target)
 	switch recordType {
+	case "TXT":
+		// Vultr returns TXT data in quoted DNS presentation form, including
+		// when the create request supplied an unquoted value.
+		return canonicalTXT(target), nil
 	case "A":
 		address, err := netip.ParseAddr(strings.TrimSpace(target))
 		if err != nil || !address.Is4() {
@@ -541,6 +545,41 @@ func canonicalTarget(recordType, target string) (string, error) {
 	}
 }
 
+func canonicalTXT(target string) string {
+	var result strings.Builder
+	result.WriteByte('"')
+	if len(target) >= 2 && target[0] == '"' && target[len(target)-1] == '"' {
+		// Keep existing DNS escapes intact, except escaped quotes: Vultr
+		// rejects interior quote characters even when escaped with a slash.
+		for i := 1; i < len(target)-1; i++ {
+			if target[i] == '\\' && i+1 < len(target)-1 {
+				i++
+				if target[i] == '"' {
+					result.WriteString(`\034`)
+				} else {
+					result.WriteByte('\\')
+					result.WriteByte(target[i])
+				}
+			} else {
+				result.WriteByte(target[i])
+			}
+		}
+	} else {
+		for i := 0; i < len(target); i++ {
+			switch b := target[i]; {
+			case b == '\\':
+				result.WriteString(`\\`)
+			case b == '"' || b < ' ' || b == 127:
+				fmt.Fprintf(&result, `\%03d`, b)
+			default:
+				result.WriteByte(b)
+			}
+		}
+	}
+	result.WriteByte('"')
+	return result.String()
+}
+
 func vultrRecord(recordType, target string, ttl int) (*govultr.DomainRecordCreateReq, error) {
 	recordType = strings.ToUpper(recordType)
 	target, err := canonicalTarget(recordType, target)
@@ -572,8 +611,6 @@ func externalDNSTarget(record govultr.DomainRecord) (string, error) {
 		return canonicalTarget(record.Type, fmt.Sprintf("%d %s", record.Priority, record.Data))
 	case "SRV":
 		return canonicalTarget(record.Type, fmt.Sprintf("%d %s", record.Priority, record.Data))
-	case "TXT":
-		return record.Data, nil
 	default:
 		return canonicalTarget(record.Type, record.Data)
 	}
@@ -631,7 +668,7 @@ func canonicalVultrData(recordType, data string) string {
 				return strings.TrimPrefix(target, "0 ")
 			}
 		}
-	case "A", "AAAA", "CAA", "SSHFP":
+	case "A", "AAAA", "CAA", "SSHFP", "TXT":
 		if target, err := canonicalTarget(strings.ToUpper(recordType), data); err == nil {
 			return target
 		}

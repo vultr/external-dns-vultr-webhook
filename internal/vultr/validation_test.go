@@ -26,6 +26,13 @@ func TestTargetNormalization(t *testing.T) {
 		{"SSHFP", "01 01 ABCDEF", "1 1 abcdef"},
 		{"CAA", `00 IODEF "mailto:test@example.net?subject=two  words"`, `0 iodef "mailto:test@example.net?subject=two  words"`},
 		{"TXT", `"keep CASE,  spaces, and dots.."`, `"keep CASE,  spaces, and dots.."`},
+		{"TXT", "unquoted  text", `"unquoted  text"`},
+		{"TXT", "", `""`},
+		{"TXT", `text with "quotes"`, `"text with \034quotes\034"`},
+		{"TXT", `"text with \"quotes\""`, `"text with \034quotes\034"`},
+		{"TXT", "line\nwith\ttabs", `"line\010with\009tabs"`},
+		{"TXT", `path\to\value`, `"path\\to\\value"`},
+		{"TXT", `"ends with a slash\\"`, `"ends with a slash\\"`},
 	} {
 		t.Run(tt.recordType+"/"+tt.input, func(t *testing.T) {
 			got, err := canonicalTarget(tt.recordType, tt.input)

@@ -81,7 +81,7 @@ func TestRecordsSupportsVultrRecordTypes(t *testing.T) {
 		endpoint.NewEndpointWithTTL("example.com", "CAA", 600, `0 issue "letsencrypt.org"`),
 		endpoint.NewEndpointWithTTL("example.com", "MX", 600, "10 mail.example.com"),
 		endpoint.NewEndpointWithTTL("host.example.com", "SSHFP", 600, "1 1 abcdef"),
-		endpoint.NewEndpointWithTTL("txt.example.com", "TXT", 600, "value with spaces"),
+		endpoint.NewEndpointWithTTL("txt.example.com", "TXT", 600, `"value with spaces"`),
 		endpoint.NewEndpointWithTTL("www.example.com", "A", 300, "192.0.2.1", "192.0.2.2"),
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -165,7 +165,7 @@ func TestApplyChangesMatchesRecordPriority(t *testing.T) {
 		{"A", "192.0.2.1", "192.0.2.1", "192.0.2.2"},
 		{"AAAA", "2001:db8::1", "2001:db8::1", "2001:db8::2"},
 		{"CNAME", "old.example.net", "old.example.net", "new.example.net"},
-		{"TXT", "old value", "old value", "new value"},
+		{"TXT", "old value", `"old value"`, `"new value"`},
 		{"NS", "ns1.example.net", "ns1.example.net", "ns2.example.net"},
 		{"CAA", `0 issue "old.example.net"`, `0 issue "old.example.net"`, `0 issue "new.example.net"`},
 		{"SSHFP", "1 1 abcdef", "1 1 abcdef", "1 1 fedcba"},

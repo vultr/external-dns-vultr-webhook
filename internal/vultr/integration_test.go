@@ -47,7 +47,7 @@ func TestWebhookRecordLifecycle(t *testing.T) {
 		{"A", `{"id":"old","type":"A","name":"app","data":"192.0.2.1","priority":-1,"ttl":300}`, "192.0.2.1", "192.0.2.2"},
 		{"AAAA", `{"id":"old","type":"AAAA","name":"app","data":"2001:0DB8:0000:0000:0000:0000:0000:0001","priority":-1,"ttl":300}`, "2001:db8::1", "2001:db8::2"},
 		{"CNAME", `{"id":"old","type":"CNAME","name":"app","data":"Old.Example.NET.","priority":-1,"ttl":300}`, "old.example.net", "new.example.net"},
-		{"TXT", `{"id":"old","type":"TXT","name":"app","data":"heritage=external-dns,external-dns/owner=test","priority":-1,"ttl":300}`, "heritage=external-dns,external-dns/owner=test", `"preserve  spaces and CASE"`},
+		{"TXT", `{"id":"old","type":"TXT","name":"app","data":"\"heritage=external-dns,external-dns/owner=test\"","priority":-1,"ttl":300}`, `"heritage=external-dns,external-dns/owner=test"`, "preserve  spaces and CASE"},
 		{"NS", `{"id":"old","type":"NS","name":"app","data":"NS1.Example.NET.","priority":-1,"ttl":300}`, "ns1.example.net", "ns2.example.net"},
 		{"MX", `{"id":"old","type":"MX","name":"app","data":"Mail.Example.NET.","priority":10,"ttl":300}`, "10 mail.example.net", "20 mail.example.net"},
 		{"SRV", `{"id":"old","type":"SRV","name":"app","data":"20 443 Service.Example.NET.","priority":10,"ttl":300}`, "10 20 443 service.example.net.", "20 20 443 service.example.net."},
@@ -90,7 +90,13 @@ func TestWebhookRecordLifecycle(t *testing.T) {
 						t.Errorf("unexpected priority in request: %+v", req)
 					}
 					nextID++
-					record := govultr.DomainRecord{ID: fmt.Sprint(nextID), Name: req.Name, Type: req.Type, Data: req.Data, Priority: priority, TTL: req.TTL}
+					data := req.Data
+					// The live API adds quotes to unquoted TXT submissions. Model
+					// that response independently of provider normalization.
+					if req.Type == "TXT" && !strings.HasPrefix(data, `"`) {
+						data = `"` + data + `"`
+					}
+					record := govultr.DomainRecord{ID: fmt.Sprint(nextID), Name: req.Name, Type: req.Type, Data: data, Priority: priority, TTL: req.TTL}
 					records = append(records, record)
 					writeJSON(t, w, map[string]any{"record": record})
 				case strings.HasPrefix(r.URL.Path, "/v2/domains/example.com/records/") && r.Method == http.MethodDelete:
