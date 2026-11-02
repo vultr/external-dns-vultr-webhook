@@ -580,7 +580,7 @@ type recordKey struct {
 func indexRecords(records []govultr.DomainRecord) map[recordKey][]string {
 	index := make(map[recordKey][]string, len(records))
 	for _, record := range records {
-		key := recordKey{name: canonicalName(record.Name), recordType: strings.ToUpper(record.Type), data: canonicalVultrData(record.Type, record.Data), priority: record.Priority}
+		key := canonicalRecordKey(record.Name, record.Type, record.Data, record.Priority)
 		index[key] = append(index[key], record.ID)
 	}
 	return index
@@ -591,7 +591,16 @@ func keyForRequest(record *govultr.DomainRecordCreateReq) recordKey {
 	if record.Priority != nil {
 		priority = *record.Priority
 	}
-	return recordKey{name: canonicalName(record.Name), recordType: strings.ToUpper(record.Type), data: canonicalVultrData(record.Type, record.Data), priority: priority}
+	return canonicalRecordKey(record.Name, record.Type, record.Data, priority)
+}
+
+func canonicalRecordKey(name, recordType, data string, priority int) recordKey {
+	recordType = strings.ToUpper(recordType)
+	// Vultr returns -1 for unused priorities, while requests leave them unset.
+	if recordType != "MX" && recordType != "SRV" {
+		priority = 0
+	}
+	return recordKey{name: canonicalName(name), recordType: recordType, data: canonicalVultrData(recordType, data), priority: priority}
 }
 
 func canonicalVultrData(recordType, data string) string {

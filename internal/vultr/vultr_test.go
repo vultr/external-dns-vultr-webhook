@@ -2,6 +2,7 @@ package vultr
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"reflect"
 	"strings"
@@ -154,6 +155,74 @@ func TestApplyChangesListsZoneOnceForMultipleDeletes(t *testing.T) {
 	}
 	if !reflect.DeepEqual(records.deleted, []string{"one", "two"}) {
 		t.Fatalf("deleted IDs = %v", records.deleted)
+	}
+}
+
+func TestApplyChangesMatchesRecordPriority(t *testing.T) {
+	tests := []struct {
+		recordType, data, oldTarget, newTarget string
+	}{
+		{"A", "192.0.2.1", "192.0.2.1", "192.0.2.2"},
+		{"AAAA", "2001:db8::1", "2001:db8::1", "2001:db8::2"},
+		{"CNAME", "old.example.net", "old.example.net", "new.example.net"},
+		{"TXT", "old value", "old value", "new value"},
+		{"NS", "ns1.example.net", "ns1.example.net", "ns2.example.net"},
+		{"CAA", `0 issue "old.example.net"`, `0 issue "old.example.net"`, `0 issue "new.example.net"`},
+		{"SSHFP", "1 1 abcdef", "1 1 abcdef", "1 1 fedcba"},
+		{"MX", "mail.example.net", "10 mail.example.net", "20 mail.example.net"},
+		{"SRV", "20 443 service.example.net", "10 20 443 service.example.net.", "20 20 443 service.example.net."},
+	}
+	for _, tt := range tests {
+		priorities := []int{-1, 0}
+		usesPriority := tt.recordType == "MX" || tt.recordType == "SRV"
+		if usesPriority {
+			priorities = []int{10}
+		}
+		for _, priority := range priorities {
+			for _, update := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/priority=%d/update=%t", tt.recordType, priority, update), func(t *testing.T) {
+					records := &fakeRecords{byZone: map[string][]govultr.DomainRecord{"example.com": {
+						{ID: "old", Type: tt.recordType, Name: "app", Data: tt.data, Priority: priority},
+					}}}
+					if usesPriority {
+						// Same name/type/data, different priority: this record must survive.
+						records.byZone["example.com"] = append([]govultr.DomainRecord{
+							{ID: "other", Type: tt.recordType, Name: "app", Data: tt.data, Priority: 30},
+						}, records.byZone["example.com"]...)
+					}
+					old := endpoint.NewEndpointWithTTL("app.example.com", tt.recordType, 300, tt.oldTarget)
+					changes := &plan.Changes{Delete: []*endpoint.Endpoint{old}}
+					if update {
+						changes = &plan.Changes{
+							UpdateOld: []*endpoint.Endpoint{old},
+							UpdateNew: []*endpoint.Endpoint{endpoint.NewEndpointWithTTL("app.example.com", tt.recordType, 300, tt.newTarget)},
+						}
+					}
+					if err := testProvider(records).ApplyChanges(context.Background(), changes); err != nil {
+						t.Fatal(err)
+					}
+					if !reflect.DeepEqual(records.deleted, []string{"old"}) {
+						t.Fatalf("deleted IDs = %v, want [old]", records.deleted)
+					}
+					if update {
+						if len(records.created) != 1 {
+							t.Fatalf("created %d records, want 1", len(records.created))
+						}
+						created := records.created[0]
+						p := 0
+						if created.Priority != nil {
+							p = *created.Priority
+						}
+						target, err := externalDNSTarget(govultr.DomainRecord{Type: created.Type, Data: created.Data, Priority: p})
+						if err != nil || target != tt.newTarget || created.Name != "app" || created.Type != tt.recordType {
+							t.Fatalf("unexpected created record: %#v, target=%q, err=%v", created, target, err)
+						}
+					} else if len(records.created) != 0 {
+						t.Fatal("delete created records")
+					}
+				})
+			}
+		}
 	}
 }
 
