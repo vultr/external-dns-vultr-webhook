@@ -2,7 +2,6 @@ package vultr
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -28,8 +27,8 @@ const (
 )
 
 var supportedRecordTypes = map[string]struct{}{
-	"A": {}, "AAAA": {}, "CAA": {}, "CNAME": {}, "MX": {},
-	"NS": {}, "SRV": {}, "SSHFP": {}, "TXT": {},
+	"A": {}, "AAAA": {}, "CNAME": {}, "MX": {},
+	"NS": {}, "SRV": {}, "TXT": {},
 }
 
 type domainService interface {
@@ -117,6 +116,7 @@ func (p *VultrProvider) Records(ctx context.Context) ([]*endpoint.Endpoint, erro
 		}
 
 		for _, record := range records {
+			record.Type = strings.ToUpper(record.Type)
 			if !supportedRecordType(record.Type) {
 				continue
 			}
@@ -139,6 +139,9 @@ func (p *VultrProvider) Records(ctx context.Context) ([]*endpoint.Endpoint, erro
 			if ep == nil {
 				return nil, fmt.Errorf("invalid %s record name %q returned by Vultr", record.Type, name)
 			}
+			// NewEndpointWithTTL trims trailing dots for MX, including the root
+			// hostname in a null MX. Our target is already canonical.
+			ep.Targets = endpoint.Targets{target}
 			endpointMap[key] = ep
 		}
 	}
@@ -252,7 +255,7 @@ func (p *VultrProvider) submitChanges(ctx context.Context, changes []*VultrChang
 		if err != nil {
 			return err
 		}
-		recordIndex := indexRecords(records)
+		recordIndex := indexRecords(records, zoneName)
 		for _, change := range plannedChanges {
 			if change.Action != vultrDelete {
 				continue
@@ -312,10 +315,12 @@ func (p *VultrProvider) ApplyChanges(ctx context.Context, changes *plan.Changes)
 	}
 	combined := make([]*VultrChange, 0, len(changes.Create)+len(changes.UpdateOld)+len(changes.UpdateNew)+len(changes.Delete))
 
+	// Type transitions (for example A -> CNAME) arrive as Delete + Create.
+	// Remove conflicting old records before creating their replacements.
 	for _, group := range []struct {
 		action    string
 		endpoints []*endpoint.Endpoint
-	}{{vultrCreate, changes.Create}, {vultrDelete, changes.UpdateOld}, {vultrCreate, changes.UpdateNew}, {vultrDelete, changes.Delete}} {
+	}{{vultrDelete, changes.UpdateOld}, {vultrDelete, changes.Delete}, {vultrCreate, changes.Create}, {vultrCreate, changes.UpdateNew}} {
 		converted, err := newVultrChanges(group.action, group.endpoints)
 		if err != nil {
 			return err
@@ -337,6 +342,9 @@ func newVultrChanges(action string, endpoints []*endpoint.Endpoint) ([]*VultrCha
 		}
 		if recordType == "CNAME" && len(ep.Targets) != 1 {
 			return nil, fmt.Errorf("CNAME %s must have exactly one target", ep.DNSName)
+		}
+		if len(ep.Targets) == 0 {
+			return nil, fmt.Errorf("%s %s must have at least one target", recordType, ep.DNSName)
 		}
 
 		ttl := vultrTTL
@@ -456,6 +464,10 @@ func relativeRecordName(name, zone string) (string, error) {
 func canonicalTarget(recordType, target string) (string, error) {
 	fields := strings.Fields(target)
 	switch recordType {
+	case "TXT":
+		// Vultr returns TXT data in quoted DNS presentation form, including
+		// when the create request supplied an unquoted value.
+		return canonicalTXT(target), nil
 	case "A":
 		address, err := netip.ParseAddr(strings.TrimSpace(target))
 		if err != nil || !address.Is4() {
@@ -464,7 +476,7 @@ func canonicalTarget(recordType, target string) (string, error) {
 		return address.String(), nil
 	case "AAAA":
 		address, err := netip.ParseAddr(strings.TrimSpace(target))
-		if err != nil || !address.Is6() {
+		if err != nil || !address.Is6() || address.Zone() != "" {
 			return "", fmt.Errorf("expected an IPv6 address")
 		}
 		return address.String(), nil
@@ -477,53 +489,65 @@ func canonicalTarget(recordType, target string) (string, error) {
 		if len(fields) != 2 {
 			return "", fmt.Errorf("expected 'priority hostname'")
 		}
-		if _, err := dnsUint16(fields[0]); err != nil {
+		priority, err := dnsUint16(fields[0])
+		if err != nil {
 			return "", fmt.Errorf("priority: %w", err)
 		}
-		return fields[0] + " " + canonicalHostname(fields[1]), nil
+		return strconv.Itoa(priority) + " " + canonicalHostname(fields[1]), nil
 	case "SRV":
 		if len(fields) != 4 {
 			return "", fmt.Errorf("expected 'priority weight port hostname'")
 		}
 		for i, label := range []string{"priority", "weight", "port"} {
-			if _, err := dnsUint16(fields[i]); err != nil {
+			value, err := dnsUint16(fields[i])
+			if err != nil {
 				return "", fmt.Errorf("%s: %w", label, err)
 			}
+			fields[i] = strconv.Itoa(value)
 		}
 		hostname := canonicalHostname(fields[3])
 		if hostname != "." {
 			hostname += "."
 		}
 		return strings.Join([]string{fields[0], fields[1], fields[2], hostname}, " "), nil
-	case "CAA":
-		if len(fields) < 3 {
-			return "", fmt.Errorf("expected 'flags tag value'")
-		}
-		flags, err := strconv.ParseUint(fields[0], 10, 8)
-		if err != nil {
-			return "", fmt.Errorf("flags must be an integer from 0 to 255")
-		}
-		if matched, _ := regexp.MatchString(`^[A-Za-z0-9]+$`, fields[1]); !matched {
-			return "", fmt.Errorf("tag must contain only letters and digits")
-		}
-		return fmt.Sprintf("%d %s %s", flags, strings.ToLower(fields[1]), strings.Join(fields[2:], " ")), nil
-	case "SSHFP":
-		if len(fields) != 3 {
-			return "", fmt.Errorf("expected 'algorithm fingerprint-type fingerprint'")
-		}
-		for i, label := range []string{"algorithm", "fingerprint type"} {
-			value, err := strconv.ParseUint(fields[i], 10, 8)
-			if err != nil || value == 0 {
-				return "", fmt.Errorf("%s must be an integer from 1 to 255", label)
-			}
-		}
-		if _, err := hex.DecodeString(fields[2]); err != nil {
-			return "", fmt.Errorf("fingerprint must be hexadecimal")
-		}
-		return strings.Join([]string{fields[0], fields[1], strings.ToLower(fields[2])}, " "), nil
 	default:
 		return target, nil
 	}
+}
+
+func canonicalTXT(target string) string {
+	var result strings.Builder
+	result.WriteByte('"')
+	if len(target) >= 2 && target[0] == '"' && target[len(target)-1] == '"' {
+		// Keep existing DNS escapes intact, except escaped quotes: Vultr
+		// rejects interior quote characters even when escaped with a slash.
+		for i := 1; i < len(target)-1; i++ {
+			if target[i] == '\\' && i+1 < len(target)-1 {
+				i++
+				if target[i] == '"' {
+					result.WriteString(`\034`)
+				} else {
+					result.WriteByte('\\')
+					result.WriteByte(target[i])
+				}
+			} else {
+				result.WriteByte(target[i])
+			}
+		}
+	} else {
+		for i := 0; i < len(target); i++ {
+			switch b := target[i]; {
+			case b == '\\':
+				result.WriteString(`\\`)
+			case b == '"' || b < ' ' || b == 127:
+				fmt.Fprintf(&result, `\%03d`, b)
+			default:
+				result.WriteByte(b)
+			}
+		}
+	}
+	result.WriteByte('"')
+	return result.String()
 }
 
 func vultrRecord(recordType, target string, ttl int) (*govultr.DomainRecordCreateReq, error) {
@@ -557,8 +581,6 @@ func externalDNSTarget(record govultr.DomainRecord) (string, error) {
 		return canonicalTarget(record.Type, fmt.Sprintf("%d %s", record.Priority, record.Data))
 	case "SRV":
 		return canonicalTarget(record.Type, fmt.Sprintf("%d %s", record.Priority, record.Data))
-	case "TXT":
-		return record.Data, nil
 	default:
 		return canonicalTarget(record.Type, record.Data)
 	}
@@ -577,10 +599,12 @@ type recordKey struct {
 	priority               int
 }
 
-func indexRecords(records []govultr.DomainRecord) map[recordKey][]string {
+func indexRecords(records []govultr.DomainRecord, zone string) map[recordKey][]string {
 	index := make(map[recordKey][]string, len(records))
 	for _, record := range records {
-		key := recordKey{name: canonicalName(record.Name), recordType: strings.ToUpper(record.Type), data: canonicalVultrData(record.Type, record.Data), priority: record.Priority}
+		// Match the same absolute/relative name representations Records accepts.
+		name, _ := relativeRecordName(absoluteRecordName(record.Name, zone), zone)
+		key := canonicalRecordKey(name, record.Type, record.Data, record.Priority)
 		index[key] = append(index[key], record.ID)
 	}
 	return index
@@ -591,7 +615,16 @@ func keyForRequest(record *govultr.DomainRecordCreateReq) recordKey {
 	if record.Priority != nil {
 		priority = *record.Priority
 	}
-	return recordKey{name: canonicalName(record.Name), recordType: strings.ToUpper(record.Type), data: canonicalVultrData(record.Type, record.Data), priority: priority}
+	return canonicalRecordKey(record.Name, record.Type, record.Data, priority)
+}
+
+func canonicalRecordKey(name, recordType, data string, priority int) recordKey {
+	recordType = strings.ToUpper(recordType)
+	// Vultr returns -1 for unused priorities, while requests leave them unset.
+	if recordType != "MX" && recordType != "SRV" {
+		priority = 0
+	}
+	return recordKey{name: canonicalName(name), recordType: recordType, data: canonicalVultrData(recordType, data), priority: priority}
 }
 
 func canonicalVultrData(recordType, data string) string {
@@ -601,8 +634,13 @@ func canonicalVultrData(recordType, data string) string {
 	case "SRV":
 		fields := strings.Fields(data)
 		if len(fields) == 3 {
-			fields[2] = canonicalHostname(fields[2])
-			return strings.Join(fields, " ")
+			if target, err := canonicalTarget("SRV", "0 "+data); err == nil {
+				return strings.TrimPrefix(target, "0 ")
+			}
+		}
+	case "A", "AAAA", "TXT":
+		if target, err := canonicalTarget(strings.ToUpper(recordType), data); err == nil {
+			return target
 		}
 	}
 	return data

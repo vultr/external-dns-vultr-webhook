@@ -2,6 +2,7 @@ package vultr
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"reflect"
 	"strings"
@@ -77,10 +78,8 @@ func TestRecordsSupportsVultrRecordTypes(t *testing.T) {
 		endpoint.NewEndpointWithTTL("app.example.com", "CNAME", 600, "target.example.com"),
 		endpoint.NewEndpointWithTTL("delegated.example.com", "NS", 600, "ns1.example.net"),
 		endpoint.NewEndpointWithTTL("example.com", "AAAA", 300, "2001:db8::1"),
-		endpoint.NewEndpointWithTTL("example.com", "CAA", 600, `0 issue "letsencrypt.org"`),
 		endpoint.NewEndpointWithTTL("example.com", "MX", 600, "10 mail.example.com"),
-		endpoint.NewEndpointWithTTL("host.example.com", "SSHFP", 600, "1 1 abcdef"),
-		endpoint.NewEndpointWithTTL("txt.example.com", "TXT", 600, "value with spaces"),
+		endpoint.NewEndpointWithTTL("txt.example.com", "TXT", 600, `"value with spaces"`),
 		endpoint.NewEndpointWithTTL("www.example.com", "A", 300, "192.0.2.1", "192.0.2.2"),
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -157,6 +156,72 @@ func TestApplyChangesListsZoneOnceForMultipleDeletes(t *testing.T) {
 	}
 }
 
+func TestApplyChangesMatchesRecordPriority(t *testing.T) {
+	tests := []struct {
+		recordType, data, oldTarget, newTarget string
+	}{
+		{"A", "192.0.2.1", "192.0.2.1", "192.0.2.2"},
+		{"AAAA", "2001:db8::1", "2001:db8::1", "2001:db8::2"},
+		{"CNAME", "old.example.net", "old.example.net", "new.example.net"},
+		{"TXT", "old value", `"old value"`, `"new value"`},
+		{"NS", "ns1.example.net", "ns1.example.net", "ns2.example.net"},
+		{"MX", "mail.example.net", "10 mail.example.net", "20 mail.example.net"},
+		{"SRV", "20 443 service.example.net", "10 20 443 service.example.net.", "20 20 443 service.example.net."},
+	}
+	for _, tt := range tests {
+		priorities := []int{-1, 0}
+		usesPriority := tt.recordType == "MX" || tt.recordType == "SRV"
+		if usesPriority {
+			priorities = []int{10}
+		}
+		for _, priority := range priorities {
+			for _, update := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/priority=%d/update=%t", tt.recordType, priority, update), func(t *testing.T) {
+					records := &fakeRecords{byZone: map[string][]govultr.DomainRecord{"example.com": {
+						{ID: "old", Type: tt.recordType, Name: "app", Data: tt.data, Priority: priority},
+					}}}
+					if usesPriority {
+						// Same name/type/data, different priority: this record must survive.
+						records.byZone["example.com"] = append([]govultr.DomainRecord{
+							{ID: "other", Type: tt.recordType, Name: "app", Data: tt.data, Priority: 30},
+						}, records.byZone["example.com"]...)
+					}
+					old := endpoint.NewEndpointWithTTL("app.example.com", tt.recordType, 300, tt.oldTarget)
+					changes := &plan.Changes{Delete: []*endpoint.Endpoint{old}}
+					if update {
+						changes = &plan.Changes{
+							UpdateOld: []*endpoint.Endpoint{old},
+							UpdateNew: []*endpoint.Endpoint{endpoint.NewEndpointWithTTL("app.example.com", tt.recordType, 300, tt.newTarget)},
+						}
+					}
+					if err := testProvider(records).ApplyChanges(context.Background(), changes); err != nil {
+						t.Fatal(err)
+					}
+					if !reflect.DeepEqual(records.deleted, []string{"old"}) {
+						t.Fatalf("deleted IDs = %v, want [old]", records.deleted)
+					}
+					if update {
+						if len(records.created) != 1 {
+							t.Fatalf("created %d records, want 1", len(records.created))
+						}
+						created := records.created[0]
+						p := 0
+						if created.Priority != nil {
+							p = *created.Priority
+						}
+						target, err := externalDNSTarget(govultr.DomainRecord{Type: created.Type, Data: created.Data, Priority: p})
+						if err != nil || target != tt.newTarget || created.Name != "app" || created.Type != tt.recordType {
+							t.Fatalf("unexpected created record: %#v, target=%q, err=%v", created, target, err)
+						}
+					} else if len(records.created) != 0 {
+						t.Fatal("delete created records")
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestApplyChangesRejectsInvalidRecordsBeforeAPIWrites(t *testing.T) {
 	tests := []struct {
 		name string
@@ -169,8 +234,8 @@ func TestApplyChangesRejectsInvalidRecordsBeforeAPIWrites(t *testing.T) {
 		{"invalid SRV", endpoint.NewEndpoint("bad.example.com", "SRV", "high 10 443 app.example.net"), "priority"},
 		{"invalid A", endpoint.NewEndpoint("bad.example.com", "A", "not-an-address"), "IPv4"},
 		{"invalid AAAA", endpoint.NewEndpoint("bad.example.com", "AAAA", "192.0.2.1"), "IPv6"},
-		{"invalid CAA", endpoint.NewEndpoint("bad.example.com", "CAA", "256 issue letsencrypt.org"), "flags"},
-		{"invalid SSHFP", endpoint.NewEndpoint("bad.example.com", "SSHFP", "1 2 not-hex"), "hexadecimal"},
+		{"unsupported CAA", endpoint.NewEndpoint("bad.example.com", "CAA", `0 issue "letsencrypt.org"`), "unsupported DNS record type"},
+		{"unsupported SSHFP", endpoint.NewEndpoint("bad.example.com", "SSHFP", "1 1 abcdef"), "unsupported DNS record type"},
 	}
 
 	for _, tt := range tests {
@@ -194,6 +259,32 @@ func TestApplyChangesRejectsUnknownZone(t *testing.T) {
 	}})
 	if err == nil || !strings.Contains(err.Error(), "no managed Vultr zone") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestUnsupportedTypesRejectAllChanges(t *testing.T) {
+	for _, recordType := range []string{"CAA", "SSHFP", "caa", "sshfp"} {
+		t.Run(recordType, func(t *testing.T) {
+			records := &fakeRecords{byZone: map[string][]govultr.DomainRecord{}}
+			p := testProvider(records)
+			unsupported := []*endpoint.Endpoint{endpoint.NewEndpoint("app.example.com", recordType, "unsupported")}
+			if _, err := p.AdjustEndpoints(unsupported); err == nil || !strings.Contains(err.Error(), "unsupported DNS record type") {
+				t.Fatalf("AdjustEndpoints accepted unsupported type: %v", err)
+			}
+			for _, changes := range []*plan.Changes{
+				{Create: unsupported}, {Delete: unsupported},
+				{UpdateOld: unsupported}, {UpdateNew: unsupported},
+			} {
+				// Even a valid change in the same batch must not be written.
+				changes.Create = append(changes.Create, endpoint.NewEndpoint("valid.example.com", "A", "192.0.2.1"))
+				if err := p.ApplyChanges(context.Background(), changes); err == nil || !strings.Contains(err.Error(), "unsupported DNS record type") {
+					t.Fatalf("ApplyChanges accepted unsupported type: %v", err)
+				}
+			}
+			if len(records.created) != 0 || len(records.deleted) != 0 || records.lists != 0 {
+				t.Fatal("unsupported changes reached the record API")
+			}
+		})
 	}
 }
 

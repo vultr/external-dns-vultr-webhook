@@ -28,6 +28,9 @@ func main() {
 	if err := env.Set(serverOptions); err != nil {
 		log.Fatal(err)
 	}
+	if err := serverOptions.Validate(); err != nil {
+		log.Fatal(err)
+	}
 
 	// Start health server
 	log.Infof("Starting liveness and readiness server on %s", serverOptions.GetHealthAddress())

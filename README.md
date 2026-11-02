@@ -13,8 +13,8 @@ your domains.
 For detailed technical instructions on how the Vultr webhook is deployed using the Bitnami Helm charts for ExternalDNS,
 see the [deployment instructions](#kubernetes-deployment).
 
-Supported record types are `A`, `AAAA`, `CAA`, `CNAME`, `MX`, `NS`, `SRV`,
-`SSHFP`, and `TXT`. MX and SRV priorities are translated between ExternalDNS's
+Supported record types are `A`, `AAAA`, `CNAME`, `MX`, `NS`, `SRV`,
+and `TXT`. MX and SRV priorities are translated between ExternalDNS's
 target format and Vultr's dedicated priority field.
 
 ## Kubernetes Deployment
@@ -229,3 +229,25 @@ available targets.
 
 Use `make unit-test`, `make static-analysis`, and `make build` before opening a
 pull request. The project follows the Go version declared in `go.mod`.
+
+The automated suite runs without Vultr credentials. It covers:
+
+- All seven supported record types through create/read/update/delete round trips,
+  using the real Vultr client against an HTTP test server with API-shaped data.
+- ExternalDNS planner convergence and TXT ownership cleanup for every supported
+  record type.
+- Multi-target and duplicate records, TTL changes, record-type transitions,
+  apex/wildcard names, null MX/SRV, and target normalization.
+- Pagination, domain-filter negotiation, dry-run, cross-zone validation, API
+  failures, request limits, and malformed requests.
+- Process startup, HTTP route wiring, health/readiness, and SIGTERM shutdown.
+
+Run additional target-conversion fuzzing with:
+
+```shell
+go test ./internal/vultr -run '^$' -fuzz '^FuzzRecordRoundTrip$' -fuzztime=30s
+```
+
+These tests do not replace live API validation: before release, verify record
+lifecycles against a disposable authorized zone and confirm cleanup restores
+its original records.
