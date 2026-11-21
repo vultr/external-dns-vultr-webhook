@@ -1,11 +1,17 @@
 name: AI PR Review
 on:
-  workflow_dispatch:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review]
 
-# Disabled pending remediation of PR Agent's configuration/template execution.
-permissions: {}
+# Comment commands are intentionally unsupported.
+permissions:
+  contents: read
+  pull-requests: write
 
 jobs:
   pr_agent_job:
-    if: ${{ false }}
-    uses: vultr/shared-actions/.github/workflows/review.yml@512eb5a96439f3e12593eb77cec601d82aaca28c
+    if: ${{ github.event.sender.type != 'Bot' }}
+    uses: vultr/shared-actions/.github/workflows/review.yml@main
+    secrets:
+      OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
+      OPENAI__API_BASE: ${{ secrets.OPENAI__API_BASE }}
